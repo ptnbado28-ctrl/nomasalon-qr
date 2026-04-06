@@ -1,0 +1,460 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>NomaSalon 入退室管理</title>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/html5-qrcode/2.3.8/html5-qrcode.min.js"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700&family=Cormorant+Garamond:wght@300;400;600&display=swap');
+
+  :root {
+    --bg-deep: #1a1410;
+    --bg-warm: #2a2118;
+    --accent-gold: #c8a45e;
+    --text-primary: #f0e6d6;
+    --text-secondary: #a89880;
+    --text-muted: #706050;
+    --success: #6ebc7e;
+    --error: #d46a6a;
+    --radius: 16px;
+  }
+
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+
+  body {
+    font-family: 'Zen Kaku Gothic New', sans-serif;
+    background: var(--bg-deep);
+    color: var(--text-primary);
+    height: 100vh; overflow: hidden;
+  }
+
+  body::before {
+    content: '';
+    position: fixed; inset: 0;
+    background:
+      radial-gradient(ellipse at 20% 50%, rgba(200,164,94,0.06) 0%, transparent 60%),
+      radial-gradient(ellipse at 80% 30%, rgba(200,164,94,0.04) 0%, transparent 50%),
+      radial-gradient(ellipse at 50% 90%, rgba(160,120,60,0.05) 0%, transparent 40%);
+    pointer-events: none;
+  }
+
+  .app {
+    position: relative; z-index: 1;
+    display: flex; flex-direction: column; align-items: center;
+    height: 100vh; padding: 2.5vh 4vw 2vh;
+  }
+
+  .header { text-align: center; margin-bottom: 2vh; flex-shrink: 0; }
+  .header h1 {
+    font-family: 'Cormorant Garamond', serif; font-weight: 300;
+    font-size: clamp(1.8rem, 4.5vw, 3rem); letter-spacing: 0.15em;
+    color: var(--accent-gold); text-shadow: 0 0 40px rgba(200,164,94,0.15);
+  }
+  .divider { width: 50px; height: 1px; background: linear-gradient(90deg, transparent, var(--accent-gold), transparent); margin: 0.8vh auto; }
+  .header .subtitle { font-size: 0.8rem; color: var(--text-secondary); letter-spacing: 0.25em; }
+
+  .cam-status {
+    font-size: 0.7rem; letter-spacing: 0.1em;
+    padding: 6px 16px; border-radius: 20px;
+    margin-bottom: 1.5vh; flex-shrink: 0;
+    transition: opacity 0.5s;
+  }
+  .cam-status.ok { background: rgba(110,188,126,0.1); color: var(--success); border: 1px solid rgba(110,188,126,0.2); }
+  .cam-status.err { background: rgba(212,106,106,0.1); color: var(--error); border: 1px solid rgba(212,106,106,0.2); }
+  .cam-status.loading { background: rgba(200,164,94,0.1); color: var(--accent-gold); border: 1px solid rgba(200,164,94,0.2); }
+
+  .scanner-wrap { position: relative; width: min(68vw, 330px); height: min(68vw, 330px); flex-shrink: 0; }
+  .scanner-box {
+    width: 100%; height: 100%; border-radius: var(--radius);
+    background: #000; border: 1px solid rgba(200,164,94,0.12);
+    box-shadow: 0 20px 60px rgba(0,0,0,0.35);
+    overflow: hidden; position: relative;
+  }
+
+  .c { position: absolute; width: 22px; height: 22px; pointer-events: none; z-index: 20; }
+  .c::before, .c::after { content:''; position:absolute; background:var(--accent-gold); }
+  .c-tl { top:6px; left:6px; } .c-tl::before { width:22px; height:2px; } .c-tl::after { width:2px; height:22px; }
+  .c-tr { top:6px; right:6px; } .c-tr::before { right:0; width:22px; height:2px; } .c-tr::after { right:0; width:2px; height:22px; }
+  .c-bl { bottom:6px; left:6px; } .c-bl::before { bottom:0; width:22px; height:2px; } .c-bl::after { bottom:0; width:2px; height:22px; }
+  .c-br { bottom:6px; right:6px; } .c-br::before { bottom:0; right:0; width:22px; height:2px; } .c-br::after { bottom:0; right:0; width:2px; height:22px; }
+
+  .scan-line {
+    position: absolute; left: 6px; right: 6px; height: 2px; z-index: 21; pointer-events: none;
+    background: linear-gradient(90deg, transparent, var(--accent-gold), transparent);
+    box-shadow: 0 0 10px rgba(200,164,94,0.3);
+    animation: scanMove 2.5s ease-in-out infinite;
+  }
+  .scan-paused .scan-line { opacity: 0; }
+  @keyframes scanMove { 0%,100%{top:6px;opacity:0} 8%{opacity:1} 92%{opacity:1} 50%{top:calc(100% - 8px)} }
+
+  #qr-reader { width:100%!important; height:100%!important; border:none!important; }
+  #qr-reader video { width:100%!important; height:100%!important; object-fit:cover!important; }
+  #qr-reader__scan_region { min-height:100%!important; }
+  #qr-reader__scan_region video { border-radius: var(--radius)!important; }
+  #qr-reader__dashboard, #qr-reader__status_span, #qr-reader__header_message,
+  #qr-reader img[alt="Info icon"], #qr-reader__camera_permission_button { display:none!important; }
+
+  .scanner-fallback {
+    position: absolute; inset: 0;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    gap: 12px; color: var(--text-muted); z-index: 1;
+  }
+  .scanner-fallback.hidden { display: none; }
+  .scanner-fallback svg { opacity: 0.4; animation: idlePulse 3s ease-in-out infinite; }
+  @keyframes idlePulse { 0%,100%{opacity:0.3;transform:scale(1)} 50%{opacity:0.5;transform:scale(1.03)} }
+  .scanner-fallback span { font-size: 0.75rem; letter-spacing: 0.15em; }
+
+  .qr-raw { margin-top:0.8vh; font-size:0.6rem; color:var(--text-muted); text-align:center; word-break:break-all; max-width:400px; min-height:1.2em; letter-spacing:0.05em; }
+
+  .test-section { margin-top: 2vh; width: 100%; max-width: 400px; flex-shrink: 0; }
+  .test-label { text-align:center; font-size:0.6rem; letter-spacing:0.2em; color:var(--text-muted); margin-bottom:8px; text-transform:uppercase; }
+  .test-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+  .test-btn {
+    display:flex; align-items:center; gap:8px; padding:12px 14px;
+    border:1px solid rgba(200,164,94,0.15); border-radius:12px;
+    background:var(--bg-warm); color:var(--text-secondary);
+    font-family:inherit; font-size:0.78rem; cursor:pointer; transition:all 0.25s;
+  }
+  .test-btn:hover,.test-btn:active { border-color:var(--accent-gold); color:var(--accent-gold); background:rgba(200,164,94,0.05); }
+  .test-btn:disabled { opacity:0.3; pointer-events:none; }
+  .test-btn .icon { width:26px; height:26px; border-radius:8px; display:flex; align-items:center; justify-content:center; font-size:0.85rem; flex-shrink:0; }
+  .test-btn.t-ok .icon { background:rgba(110,188,126,0.15); color:var(--success); }
+  .test-btn.t-used .icon { background:rgba(200,164,94,0.15); color:var(--accent-gold); }
+  .test-btn.t-exp .icon { background:rgba(212,106,106,0.15); color:var(--error); }
+  .test-btn.t-inv .icon { background:rgba(112,96,80,0.2); color:var(--text-muted); }
+  .test-btn .label { line-height:1.3; text-align:left; }
+  .test-btn .label small { display:block; font-size:0.58rem; color:var(--text-muted); margin-top:2px; }
+
+  .log-section { margin-top:auto; width:100%; max-width:400px; padding-top:1vh; }
+  .log-header { display:flex; align-items:center; justify-content:space-between; margin-bottom:4px; }
+  .log-header span { font-size:0.6rem; letter-spacing:0.2em; color:var(--text-muted); text-transform:uppercase; }
+  .log-clear { font-size:0.6rem; color:var(--text-muted); background:none; border:none; cursor:pointer; font-family:inherit; }
+  .log-clear:hover { color:var(--text-secondary); }
+  .log-list { display:flex; flex-direction:column; gap:3px; max-height:12vh; overflow-y:auto; scrollbar-width:thin; scrollbar-color:var(--text-muted) transparent; }
+  .log-item { display:flex; align-items:center; gap:8px; padding:7px 10px; border-radius:8px; background:rgba(42,33,24,0.6); font-size:0.7rem; animation:logIn 0.3s ease; }
+  @keyframes logIn { from{opacity:0;transform:translateY(-4px)} to{opacity:1;transform:translateY(0)} }
+  .log-dot { width:6px; height:6px; border-radius:50%; flex-shrink:0; }
+  .log-item.ok .log-dot { background:var(--success); }
+  .log-item.ng .log-dot { background:var(--error); }
+  .log-time { color:var(--text-muted); flex-shrink:0; }
+  .log-msg { color:var(--text-secondary); }
+
+  .footer { flex-shrink:0; padding-top:0.5vh; text-align:center; }
+  .clock { font-family:'Cormorant Garamond',serif; font-size:1rem; font-weight:300; color:var(--text-muted); letter-spacing:0.12em; }
+
+  .lock-indicator { position:fixed; top:2vh; right:4vw; display:flex; align-items:center; gap:6px; font-size:0.65rem; color:var(--text-muted); letter-spacing:0.1em; z-index:10; }
+  .lock-dot { width:7px; height:7px; border-radius:50%; background:var(--error); transition:background 0.3s; }
+  .lock-dot.unlocked { background:var(--success); box-shadow:0 0 8px rgba(110,188,126,0.4); animation:lockPulse 1s ease 3; }
+  @keyframes lockPulse { 0%,100%{box-shadow:0 0 8px rgba(110,188,126,0.4)} 50%{box-shadow:0 0 16px rgba(110,188,126,0.6)} }
+
+  .overlay { display:none; position:fixed; inset:0; z-index:50; align-items:center; justify-content:center; }
+  .overlay.show { display:flex; animation:overlayIn 0.25s ease; }
+  @keyframes overlayIn { from{opacity:0} to{opacity:1} }
+  .overlay-bg { position:absolute; inset:0; backdrop-filter:blur(12px); }
+  .overlay.ok .overlay-bg { background:rgba(25,45,30,0.88); }
+  .overlay.ng .overlay-bg { background:rgba(50,25,25,0.88); }
+  .overlay-card { position:relative; z-index:1; text-align:center; padding:3rem; animation:cardPop 0.35s cubic-bezier(0.34,1.56,0.64,1); }
+  @keyframes cardPop { from{opacity:0;transform:scale(0.85) translateY(12px)} to{opacity:1;transform:scale(1) translateY(0)} }
+  .overlay-icon { width:80px; height:80px; border-radius:50%; display:flex; align-items:center; justify-content:center; margin:0 auto 1.5rem; font-size:2.2rem; }
+  .overlay.ok .overlay-icon { background:rgba(110,188,126,0.15); border:2px solid rgba(110,188,126,0.3); color:var(--success); box-shadow:0 0 40px rgba(110,188,126,0.15); }
+  .overlay.ng .overlay-icon { background:rgba(212,106,106,0.15); border:2px solid rgba(212,106,106,0.3); color:var(--error); box-shadow:0 0 40px rgba(212,106,106,0.15); }
+  .overlay-title { font-family:'Cormorant Garamond',serif; font-size:2.4rem; font-weight:400; margin-bottom:0.8rem; }
+  .overlay.ok .overlay-title { color:var(--success); }
+  .overlay.ng .overlay-title { color:var(--error); }
+  .overlay-body { font-size:0.95rem; color:var(--text-secondary); line-height:2; }
+  .overlay-body strong { color:var(--text-primary); font-weight:500; }
+  .overlay-timer { margin-top:1.5rem; width:120px; height:3px; background:rgba(255,255,255,0.08); border-radius:2px; margin-left:auto; margin-right:auto; overflow:hidden; }
+  .overlay-timer-bar { height:100%; border-radius:2px; animation:timerShrink 4s linear forwards; }
+  .overlay.ok .overlay-timer-bar { background:var(--success); }
+  .overlay.ng .overlay-timer-bar { background:var(--error); }
+  @keyframes timerShrink { from{width:100%} to{width:0%} }
+</style>
+</head>
+<body>
+<div class="app">
+  <header class="header">
+    <h1>NomaSalon</h1>
+    <div class="divider"></div>
+    <p class="subtitle">QRコードをかざしてください</p>
+  </header>
+
+  <div class="cam-status loading" id="camStatus">カメラ接続中…</div>
+
+  <div class="scanner-wrap">
+    <div class="scanner-box" id="scannerBox">
+      <div class="c c-tl"></div><div class="c c-tr"></div>
+      <div class="c c-bl"></div><div class="c c-br"></div>
+      <div class="scan-line"></div>
+      <div id="qr-reader"></div>
+      <div class="scanner-fallback" id="scannerFallback">
+        <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.2">
+          <rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/>
+          <rect x="3" y="14" width="7" height="7"/><rect x="14" y="14" width="3" height="3"/>
+          <rect x="19" y="14" width="2" height="2"/><rect x="14" y="19" width="2" height="2"/>
+          <rect x="19" y="19" width="2" height="2"/>
+        </svg>
+        <span>スキャン待機中</span>
+      </div>
+    </div>
+  </div>
+
+  <div class="qr-raw" id="qrRaw"></div>
+
+  <div class="test-section">
+    <div class="test-label">テスト用デモ操作</div>
+    <div class="test-grid">
+      <button class="test-btn t-ok" onclick="runDemo('valid')">
+        <div class="icon">✓</div>
+        <div class="label">有効QR<small>入室成功</small></div>
+      </button>
+      <button class="test-btn t-used" onclick="runDemo('used')">
+        <div class="icon">↻</div>
+        <div class="label">使用済み<small>再入室拒否</small></div>
+      </button>
+      <button class="test-btn t-exp" onclick="runDemo('expired')">
+        <div class="icon">⏱</div>
+        <div class="label">時間外<small>別日の予約</small></div>
+      </button>
+      <button class="test-btn t-inv" onclick="runDemo('invalid')">
+        <div class="icon">?</div>
+        <div class="label">無効QR<small>該当なし</small></div>
+      </button>
+    </div>
+  </div>
+
+  <div class="log-section" id="logSection" style="display:none;">
+    <div class="log-header">
+      <span>入退室ログ</span>
+      <button class="log-clear" onclick="clearLog()">クリア</button>
+    </div>
+    <div class="log-list" id="logList"></div>
+  </div>
+
+  <footer class="footer">
+    <div class="clock" id="clock"></div>
+  </footer>
+</div>
+
+<div class="lock-indicator">
+  <div class="lock-dot" id="lockDot"></div>
+  <span id="lockLabel">施錠中</span>
+</div>
+
+<div class="overlay" id="overlay">
+  <div class="overlay-bg"></div>
+  <div class="overlay-card">
+    <div class="overlay-icon" id="overlayIcon"></div>
+    <div class="overlay-title" id="overlayTitle"></div>
+    <div class="overlay-body" id="overlayBody"></div>
+    <div class="overlay-timer"><div class="overlay-timer-bar" id="overlayTimerBar"></div></div>
+  </div>
+</div>
+
+<script>
+// ═══════════════════════════════════════════
+// NomaSalon QR入退室管理 — カメラ対応版 v3
+// ═══════════════════════════════════════════
+
+const mockDB = {
+  'NOMA-20260328-1400-A1B2': {
+    name: '田中 太郎', date: '2026/03/28',
+    time: '14:00〜15:00', guests: 2, status: 'reserved'
+  },
+  'NOMA-20260328-1200-E5F6': {
+    name: '鈴木 一郎', date: '2026/03/28',
+    time: '12:00〜13:00', guests: 3, status: 'used'
+  },
+  'NOMA-20260329-1600-C3D4': {
+    name: '佐藤 花子', date: '2026/03/29',
+    time: '16:00〜17:00', guests: 1, status: 'reserved'
+  }
+};
+
+let processing = false;
+let overlayTimeout = null;
+let scanner = null;
+let cameraReady = false;
+
+// ─── Camera ───
+async function initCamera() {
+  const statusEl = document.getElementById('camStatus');
+  const fallback = document.getElementById('scannerFallback');
+
+  try {
+    scanner = new Html5Qrcode("qr-reader");
+    await scanner.start(
+      { facingMode: "environment" },
+      {
+        fps: 10,
+        qrbox: function(vw, vh) {
+          const s = Math.min(vw, vh) * 0.7;
+          return { width: s, height: s };
+        },
+        aspectRatio: 1.0,
+        disableFlip: false
+      },
+      onScanSuccess,
+      () => {}
+    );
+
+    cameraReady = true;
+    fallback.classList.add('hidden');
+    statusEl.textContent = 'カメラ接続済み';
+    statusEl.className = 'cam-status ok';
+    setTimeout(() => { statusEl.style.opacity = '0'; setTimeout(() => statusEl.style.display = 'none', 500); }, 2500);
+  } catch (err) {
+    console.warn('Camera unavailable:', err);
+    statusEl.textContent = 'カメラ未接続 — デモボタンで操作できます';
+    statusEl.className = 'cam-status err';
+  }
+}
+
+function onScanSuccess(decodedText) {
+  if (processing) return;
+  processing = true;
+
+  document.getElementById('qrRaw').textContent = '読取: ' + decodedText;
+  if (scanner) scanner.pause(true);
+  document.getElementById('scannerBox').classList.add('scan-paused');
+
+  const result = validate(decodedText);
+  showResult(result);
+  addLog(result);
+  if (result.valid) unlockDoor();
+
+  setTimeout(() => {
+    document.getElementById('scannerBox').classList.remove('scan-paused');
+    if (scanner && cameraReady) { try { scanner.resume(); } catch(e) {} }
+    processing = false;
+  }, 4500);
+}
+
+// ─── Demo ───
+function runDemo(scenario) {
+  if (processing) return;
+  processing = true;
+  disableButtons(true);
+
+  let qr;
+  switch (scenario) {
+    case 'valid':
+      mockDB['NOMA-20260328-1400-A1B2'].status = 'reserved';
+      qr = 'NOMA-20260328-1400-A1B2'; break;
+    case 'used': qr = 'NOMA-20260328-1200-E5F6'; break;
+    case 'expired': qr = 'NOMA-20260329-1600-C3D4'; break;
+    case 'invalid': qr = 'UNKNOWN-QR-99999'; break;
+  }
+
+  document.getElementById('qrRaw').textContent = '読取: ' + qr;
+  const result = validate(qr);
+  showResult(result);
+  addLog(result);
+  if (result.valid) unlockDoor();
+
+  setTimeout(() => { processing = false; disableButtons(false); }, 4300);
+}
+
+// ─── Validation ───
+function validate(qr) {
+  const r = mockDB[qr];
+  if (!r) return { valid: false, title: '無効なQR', msg: '予約が見つかりません' };
+  if (r.status === 'used') return { valid: false, title: '使用済み', msg: r.name + ' 様のQRは使用済みです', sub: r.date + ' ' + r.time };
+  if (r.status === 'checked_in') return { valid: false, title: '入室済み', msg: r.name + ' 様はすでに入室済みです' };
+
+  const d = new Date();
+  const today = d.getFullYear() + '/' + String(d.getMonth()+1).padStart(2,'0') + '/' + String(d.getDate()).padStart(2,'0');
+  if (r.date !== today) return { valid: false, title: '時間外', msg: '有効日: ' + r.date, sub: '本日の予約ではありません' };
+
+  r.status = 'checked_in';
+  return { valid: true, name: r.name, date: r.date, time: r.time, guests: r.guests };
+}
+
+// ─── Result ───
+function showResult(result) {
+  const o = document.getElementById('overlay');
+  const bar = document.getElementById('overlayTimerBar');
+  o.className = 'overlay';
+  if (overlayTimeout) clearTimeout(overlayTimeout);
+  bar.style.animation = 'none'; bar.offsetHeight; bar.style.animation = '';
+
+  if (result.valid) {
+    o.classList.add('ok', 'show');
+    document.getElementById('overlayIcon').textContent = '✓';
+    document.getElementById('overlayTitle').textContent = '入室OK';
+    document.getElementById('overlayBody').innerHTML =
+      '<strong>' + result.name + '</strong> 様<br>' + result.date + '　' + result.time + '<br>' + result.guests + '名様';
+    playSound(true);
+  } else {
+    o.classList.add('ng', 'show');
+    document.getElementById('overlayIcon').textContent = '✗';
+    document.getElementById('overlayTitle').textContent = result.title;
+    let h = result.msg;
+    if (result.sub) h += '<br><span style="font-size:0.8rem;color:var(--text-muted)">' + result.sub + '</span>';
+    document.getElementById('overlayBody').innerHTML = h;
+    playSound(false);
+  }
+  overlayTimeout = setTimeout(() => o.classList.remove('show'), 4000);
+}
+
+function unlockDoor() {
+  const dot = document.getElementById('lockDot');
+  const label = document.getElementById('lockLabel');
+  dot.classList.add('unlocked'); label.textContent = '解錠中';
+  setTimeout(() => { dot.classList.remove('unlocked'); label.textContent = '施錠中'; }, 5000);
+}
+
+function addLog(result) {
+  document.getElementById('logSection').style.display = '';
+  const list = document.getElementById('logList');
+  const t = new Date().toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit', second:'2-digit' });
+  const cls = result.valid ? 'ok' : 'ng';
+  const msg = result.valid ? '入室: ' + result.name + ' 様（' + result.guests + '名）' : '拒否: ' + result.title;
+  const item = document.createElement('div');
+  item.className = 'log-item ' + cls;
+  item.innerHTML = '<div class="log-dot"></div><span class="log-time">' + t + '</span><span class="log-msg">' + msg + '</span>';
+  list.insertBefore(item, list.firstChild);
+  while (list.children.length > 10) list.removeChild(list.lastChild);
+}
+
+function clearLog() {
+  document.getElementById('logList').innerHTML = '';
+  document.getElementById('logSection').style.display = 'none';
+}
+
+function playSound(success) {
+  try {
+    const ctx = new (window.AudioContext || window.webkitAudioContext)();
+    const osc = ctx.createOscillator();
+    const gain = ctx.createGain();
+    osc.connect(gain); gain.connect(ctx.destination); gain.gain.value = 0.12;
+    if (success) {
+      osc.type = 'sine'; osc.frequency.value = 880; osc.start(ctx.currentTime);
+      osc.frequency.setValueAtTime(1108, ctx.currentTime + 0.08);
+      osc.frequency.setValueAtTime(1320, ctx.currentTime + 0.16);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.45);
+      osc.stop(ctx.currentTime + 0.45);
+    } else {
+      osc.type = 'square'; osc.frequency.value = 330; osc.start(ctx.currentTime);
+      osc.frequency.setValueAtTime(220, ctx.currentTime + 0.12);
+      gain.gain.exponentialRampToValueAtTime(0.001, ctx.currentTime + 0.35);
+      osc.stop(ctx.currentTime + 0.35);
+    }
+  } catch(e) {}
+}
+
+function disableButtons(d) { document.querySelectorAll('.test-btn').forEach(b => b.disabled = d); }
+
+function updateClock() {
+  const n = new Date();
+  const d = n.toLocaleDateString('ja-JP', { year:'numeric', month:'long', day:'numeric', weekday:'short' });
+  const t = n.toLocaleTimeString('ja-JP', { hour:'2-digit', minute:'2-digit' });
+  document.getElementById('clock').textContent = d + '　' + t;
+}
+
+updateClock();
+setInterval(updateClock, 1000);
+initCamera();
+</script>
+</body>
+</html>
